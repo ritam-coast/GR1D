@@ -550,71 +550,138 @@ module hybrid_eos_module
 
 end module hybrid_eos_module
 
-subroutine hybrid_eos(rho,enr,prs,pth,dpdrho_o,dpde_o,soundsqr,keytemp)
+module pwp_module
+  implicit none
+  integer, parameter :: npwp = 19
+  real*8, parameter :: pwp_K(19) = (/ &
+     6.1187577190167852d+12, &
+     9.5501074299208838d+14, &
+     4.7721408896840747d+22, &
+     3.6573561788633219d+13, &
+     3.4228609521189687d-04, &
+     8.8212322594389081d-41, &
+     2.1507858768922988d+34, &
+     4.1558788005951469d-77, &
+     1.3257532431044531d-67, &
+     1.4650479270760609d-58, &
+     7.4482015991063122d-47, &
+     8.9577412935625742d-34, &
+     2.4545979565420093d-21, &
+     3.4862514364619973d-11, &
+     7.1053378376665277d-04, &
+     4.4895236212320263d+01, &
+     4.1342383708044246d+04, &
+     2.3776870604301859d+06, &
+     2.3776870604301859d+06 /)
+  real*8, parameter :: pwp_G(19) = (/ &
+     1.5840000000000001d+00, &
+     1.2869999999999999d+00, &
+     6.2200000000000000d-01, &
+     1.3560000000000001d+00, &
+     2.5699999999999998d+00, &
+     5.0999999999999996d+00, &
+     4.9396991685218265d-02, &
+     7.4361208516427642d+00, &
+     6.8023818890827394d+00, &
+     6.1995990631434408d+00, &
+     5.4198997043748864d+00, &
+     4.5497669658045607d+00, &
+     3.7240296292882080d+00, &
+     3.0520909945914112d+00, &
+     2.5704348056325448d+00, &
+     2.2558822330851842d+00, &
+     2.0629798235518164d+00, &
+     1.9493342669054223d+00, &
+     1.9493342669054223d+00 /)
+  real*8, parameter :: pwp_a(19) = (/ &
+     0.0000000000000000d+00, &
+     -2.2282553734253792d+17, &
+     1.2081426138038909d+19, &
+     6.8202175648473037d+18, &
+     1.4648172077930039d+19, &
+     2.1474171844191965d+19, &
+     2.9966317310508748d+20, &
+     1.5291699363957142d+20, &
+     1.5058915165998508d+20, &
+     1.4760632997907582d+20, &
+     1.4182803863136176d+20, &
+     1.3041133653946114d+20, &
+     1.0789589759492030d+20, &
+     6.5482961536872743d+19, &
+     -6.5876024349198930d+18, &
+     -1.1174906473447416d+20, &
+     -2.4066907842305412d+20, &
+     -3.7489952956063390d+20, &
+     -3.7489952956063390d+20 /)
+  real*8, parameter :: pwp_rj(18) = (/ &
+     2.4266100950824142d+07, &
+     3.7757219092541602d+11, &
+     2.6242185433844443d+12, &
+     1.0641430182243142d+14, &
+     2.8973435877013212d+14, &
+     5.3500000000000000d+14, &
+     9.7326802616285750d+14, &
+     9.9173359202359988d+14, &
+     1.0063102685803352d+15, &
+     1.0321315400605175d+15, &
+     1.0773536747509169d+15, &
+     1.1551466305708205d+15, &
+     1.2855399650518615d+15, &
+     1.4969035835574022d+15, &
+     1.8269519495514888d+15, &
+     2.3243129010726485d+15, &
+     3.0523062692649205d+15, &
+     4.0957986844346155d+15 /)
+end module pwp_module
 
+subroutine pwp_cold(rho, pco, ecold, dpco)
+  use pwp_module
+  implicit none
+  real*8, intent(in)  :: rho
+  real*8, intent(out) :: pco, ecold, dpco
+  integer :: i, seg
+  seg = 1
+  do i = 1, npwp-1
+     if (rho .ge. pwp_rj(i)) seg = i+1
+  enddo
+  pco   = pwp_K(seg) * rho**pwp_G(seg)
+  ecold = pwp_a(seg) + pwp_K(seg) * rho**(pwp_G(seg)-1.d0) / (pwp_G(seg)-1.d0)
+  dpco  = pwp_G(seg) * pco / rho
+end subroutine pwp_cold
+
+subroutine hybrid_eos(rho,enr,prs,pth,dpdrho_o,dpde_o,soundsqr,keytemp)
+  ! replaced: cold part = our 15-segment piecewise polytrope; thermal part = (gammath-1)*rho*(eps-eps_cold)
   use hybrid_eos_module
   implicit none
-
-! Input
   real*8 rho,enr,prs,soundsqr
   integer keytemp
-! Output
-  real*8 dpdrho_o,dpde_o
-
-
-! Local 
-!
-  real*8 pco,pth,eth,dpth_drho,dpth_denr
-  real*8 Gx,Ex,Kx,Ex3,dpco_drho,dpco_denr
-  real*8 up,dp_drho,dpde
-
+  real*8 dpdrho_o,dpde_o,pth
+  real*8 pcold,ecold,dpcold,eth,dpth_drho,dpth_denr,dp_drho,dpde
+  call pwp_cold(rho, pcold, ecold, dpcold)
   if(keytemp.eq.1) then
-!	energy wanted
-     prs = K1*rho**gamma1 
-     enr=prs/rho/(gamma1-1.d0)
-     soundsqr=gamma1*prs/rho
+     enr = ecold
+     prs = pcold
+     soundsqr = dpcold
+     pth = 0.d0
+     dpdrho_o = dpcold
+     dpde_o = 0.d0
+     return
   endif
-
-  if(rho .lt. rhonuc) then
-     Kx=K1
-     Ex=E1
-     Gx=gamma1
-     Ex3=0.d0
-  else
-     Kx=K2
-     Ex=E2
-     Gx=gamma2
-     Ex3=E3
+  eth = rho*(enr - ecold)
+  pth = (gammath - 1.d0)*eth
+  dpth_drho = (gammath - 1.d0)*(enr - ecold)
+  dpth_denr = (gammath - 1.d0)*rho
+  if (pth.lt.0.0d0) then
+     pth = 0.0d0; dpth_drho = 0.0d0; dpth_denr = 0.0d0
   endif
-
-!                Thermal
-    up=Ex*rho**Gx+Ex3*rho
-    eth = enr*rho - up
-    pth = (gammath - 1)*eth
-    dpth_drho=(gammath - 1)*(enr-Ex*Gx*rho**(Gx-1.d0)-Ex3)
-    dpth_denr=(gammath - 1)*rho
-
-    if (pth.lt.0.0d0) then
-       pth = 0.0d0
-       dpth_drho = 0.0d0
-       dpth_denr = 0.0d0
-    endif
-
-
-!                 Cold 
-    pco = Kx*rho**Gx
-    dpco_drho=Gx*pco/rho
-    dpco_denr=0.d0
-!
-    prs=pco+pth
-    dpde=dpco_denr+dpth_denr
-    dp_drho=dpco_drho+dpth_drho
-    soundsqr= dp_drho+dpde*prs/rho**2
-
-    dpdrho_o = dp_drho
-    dpde_o = dpde
-
+  prs = pcold + pth
+  dpde = dpth_denr
+  dp_drho = dpcold + dpth_drho
+  soundsqr = dp_drho + dpde*prs/rho**2
+  dpdrho_o = dp_drho
+  dpde_o = dpde
 end subroutine hybrid_eos
+
 
 
 subroutine init_hybrid_eos
@@ -722,3 +789,73 @@ subroutine atmos_eos(i,xrho,xprs,xenr,xcs2)
   atmo(i) = 1
 
 end subroutine atmos_eos
+
+
+!*************************************************************************
+! Parametrised energy sink (stand-in for neutrino cooling), driven by environment variables:
+!   COOL_TAU     e-folding time of the thermal energy [s]   (<=0 or unset: off)
+!   COOL_RHO     only zones with rho > COOL_RHO [g/cm3]      (default 1e12)
+!   COOL_TRIGGER start when max(rho) first exceeds this [g/cm3] (default 5e14)
+!   COOL_ECAP    stop after this much energy at infinity is radiated [Msun c^2] (default huge)
+! Thermal energy = eps - eps_cold(rho); it relaxes toward 0 as exp(-t/tau). Cold energy is never removed.
+subroutine apply_cooling(dts)
+  use GR1D_module
+  implicit none
+  real*8 dts
+  logical, save :: init = .false., active = .false., finished = .false., enabled = .false.
+  real*8, save :: tau = -1.d0, rhothr = 1.d12, trig = 5.d14, ecap = 1.d30, erad = 0.d0
+  character*64 buf
+  integer st, i, keyerr, keytemp
+  real*8 pc, ecold, dp, eth, deps, dm, rcgs, fac, esum_th
+  real*8 :: rv
+  if (.not.init) then
+     init = .true.
+     call get_environment_variable('COOL_TAU', buf, status=st)
+     if (st.eq.0) then
+        read(buf,*) tau
+        if (tau.gt.0.d0) enabled = .true.
+     endif
+     call get_environment_variable('COOL_RHO', buf, status=st)
+     if (st.eq.0) read(buf,*) rhothr
+     call get_environment_variable('COOL_TRIGGER', buf, status=st)
+     if (st.eq.0) read(buf,*) trig
+     call get_environment_variable('COOL_ECAP', buf, status=st)
+     if (st.eq.0) read(buf,*) ecap
+     if (enabled) then
+        open(unit=777,file=trim(adjustl(outdir))//'/cooling_t.dat',status='unknown',form='formatted')
+        write(*,*) 'COOLING ON: tau[s], rho_thr, trigger, ecap = ', tau, rhothr, trig, ecap
+     endif
+  endif
+  if (.not.enabled .or. finished) return
+  if (.not.active) then
+     if (maxval(rho(ghosts1+1:n1-ghosts1))/rho_gf .gt. trig) active = .true.
+     if (.not.active) return
+  endif
+  fac = 1.d0 - exp(-dts/(tau*time_gf))
+  esum_th = 0.d0
+  do i = ghosts1+1, n1-ghosts1
+     rcgs = rho(i)/rho_gf
+     if (rcgs .gt. rhothr) then
+        call pwp_cold(rcgs, pc, ecold, dp)
+        eth = eps(i) - ecold*eps_gf
+        if (eth .gt. 0.d0) then
+           deps = eth*fac
+           dm = 4.d0*pi*x1(i)**2*X(i)*W(i)*rho(i)*(x1i(i+1)-x1i(i))
+           erad = erad + alp(i)*deps*dm
+           eps(i) = eps(i) - deps
+           keytemp = 0; keyerr = 0
+           call eos(i,rho(i),temp(i),ye(i),eps(i),press(i),keytemp,keyerr,1,eoskey,eos_rf_prec)
+           call eos(i,rho(i),temp(i),ye(i),eps(i),cs2(i),keytemp,keyerr,6,eoskey,eos_rf_prec)
+        endif
+     endif
+  enddo
+  write(777,'(1P4E16.8)') time, erad, maxval(rho(ghosts1+1:n1-ghosts1))/rho_gf, dts/time_gf
+  if (erad .gt. ecap) finished = .true.
+  call prim2con
+  call boundaries(0,0)
+  if (GR) then
+     call con2GR
+     call GR_alp
+     call GR_boundaries
+  endif
+end subroutine apply_cooling

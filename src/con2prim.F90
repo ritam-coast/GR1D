@@ -113,12 +113,9 @@ subroutine con2prim_1
                  !here vv is romero's v not v^r
                  vv = q(i,2)/(q(i,3)+q(i,1)+op(i))
                  if (vv.gt.1.0d0.or.vv.lt.-1.0d0) then
-                    write(6,*) "We have a problem finding v:" 
-                    write(6,*) "Timestep: ", nt
-                    write(6,"(2i6,1P10E15.6)") it,i,rrho/rho_gf,rho(i)/rho_gf,eeps/eps_gf,ww
-                    write(6,"(2i6,1P10E15.6)") it,i,q(i,2), (q(i,3)+q(i,1)+op(i)),vv,q(i,3), q(i,1), op(i)
-                    call flush(6)
-                    stop "con2prim problem"
+                    ! Newton stepped outside the physical bracket: hand over to bisection
+                    it = max_iterations
+                    exit
                  endif
                  discrim = 1.0d0-vv**2
                  if (discrim.lt.0.0d0) then
@@ -171,6 +168,10 @@ subroutine con2prim_1
                  err = abs(1.0d0-press(i)/op(i))
               enddo
               if(it.ge.max_iterations) then
+                 call con2prim_bis(i,success)
+                 if (success.eq.1) then
+                    pt_counter = 0
+                 endif
                  do while(success.eq.0.and.pt_counter.lt.7)
                     pt_counter = pt_counter + 1
                     low_tol = low_tol*10.0d0
@@ -183,9 +184,11 @@ subroutine con2prim_1
                  enddo
                  if(pt_counter.eq.7.and.success.eq.0) then
                     write(*,*) "con2prim failed with tol > 1.0d-4", i
+                    write(*,'(A,1P6E14.5)') " DEBUG zone i, rho,eps,press(cgs-ish),v: ", rho(i)/rho_gf, eps(i)/eps_gf, press(i)/press_gf, v(i), old_press(i)/press_gf, x1(i)/length_gf
+                    write(*,'(A,1P4E14.5)') " DEBUG q: ", q(i,1), q(i,2), q(i,3), X(i)
                     stop "con2prim problem: iteration on tol"
                  else
-                    write(*,*) "Success with smaller tol: ", low_tol, i
+                    ! (bisection / reduced-tolerance recovery succeeded)
                     pt_counter = 0
                     success = 0
                     low_tol = tol
@@ -691,3 +694,62 @@ subroutine con2prim_pt_rot(tol,i,success)
 
 
 end subroutine con2prim_pt_rot
+
+
+!*************************************************************************
+! Robust bracketed (bisection) primitive recovery for EOS with discontinuous
+! dP/drho (piecewise polytropes).  Solves g(p) = p_eos(rho(p),eps(p)) - p = 0.
+subroutine con2prim_bis(i,success)
+  use GR1D_module
+  use atmos
+  implicit none
+  integer i,success,it,kk
+  real*8 pb_lo,pb_hi,pb_m,gb_lo,gb_hi,gb_m,pb_min,pb_scale
+  real*8 eosdummy,pb_dpde,pb_dpdrh,pb_pp,pb_vv,pb_ww,pb_rho,pb_eps
+  integer keyerr,keytemp
+  success = 0
+  pb_scale = abs(q(i,2)) + abs(q(i,3)) + q(i,1)
+  pb_min = abs(q(i,2)) - q(i,3) - q(i,1)
+  if (pb_min.lt.0.0d0) pb_min = 0.0d0
+  pb_lo = pb_min*(1.0d0+1.0d-9) + 1.0d-15*pb_scale
+  call bis_g(pb_lo,gb_lo)
+  pb_hi = max(2.0d0*pb_lo, 10.0d0*abs(press(i)), 1.0d-3*q(i,1))
+  do kk=1,300
+     call bis_g(pb_hi,gb_hi)
+     if (gb_hi.lt.0.0d0) exit
+     pb_hi = pb_hi*3.0d0
+  enddo
+  if (.not.(gb_lo.gt.0.0d0.and.gb_hi.lt.0.0d0)) return
+  do it=1,400
+     pb_m = 0.5d0*(pb_lo+pb_hi)
+     call bis_g(pb_m,gb_m)
+     if (gb_m.gt.0.0d0) then
+        pb_lo = pb_m
+     else
+        pb_hi = pb_m
+     endif
+     if (abs(pb_hi-pb_lo).lt.1.0d-14*pb_hi) exit
+  enddo
+  press(i) = 0.5d0*(pb_lo+pb_hi)
+  success = 1
+contains
+  subroutine bis_g(p,g)
+    real*8 p,g
+    pb_vv = q(i,2)/(q(i,3)+q(i,1)+p)
+    if (abs(pb_vv).ge.1.0d0) then
+       g = 1.0d300
+       return
+    endif
+    pb_ww = 1.0d0/sqrt(1.0d0-pb_vv**2)
+    pb_rho = q(i,1)/X(i)/pb_ww
+    pb_eps = (q(i,3)+q(i,1)+p*(1.0d0-pb_ww**2))/(pb_rho*pb_ww**2)-1.0d0
+    keytemp = 0
+    call eos_full(i,pb_rho,temp(i),ye(i),pb_eps,pb_pp, &
+         eosdummy,eosdummy,eosdummy,eosdummy,&
+         pb_dpde,pb_dpdrh, &
+         eosdummy,eosdummy,eosdummy,eosdummy,eosdummy,eosdummy,&
+         eosdummy,eosdummy,eosdummy,eosdummy, &
+         keytemp,keyerr,eoskey,eos_rf_prec)
+    g = pb_pp - p
+  end subroutine bis_g
+end subroutine con2prim_bis

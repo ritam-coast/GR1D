@@ -127,20 +127,9 @@ subroutine output_control
      endif
   endif
 
-  !min lapse to increase output frequency near BH formation
+  !(patched) near BH formation keep the cheap scalar time series dense, but do NOT dump profiles every step
   if (alp(ghosts1+1).lt.0.4) then
-     ntout = 10
-     ntout_scalar = 10
-     if (alp(ghosts1+1).lt.0.3) then
-        ntinfo = 1
-        ntout = 1
-        ntout_scalar = 1
-        if (initial_data.eq."OSC") then
-           ntinfo = 10
-           ntout = 10
-           ntout_scalar = 10
-        endif
-     endif
+     ntout_scalar = 1
   endif
 
 end subroutine output_control

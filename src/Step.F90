@@ -502,5 +502,9 @@ subroutine Step(dts)
     endif
  endif
 
+
+ ! parametrised energy sink (see apply_cooling in eos.F90); off unless COOL_TAU is set
+ call apply_cooling(dts)
+
 end subroutine Step
 
