@@ -12,6 +12,9 @@ subroutine map_profile(lprofile_name)
   integer i,ibuffer
   
   integer keytemp,keyerr,eosflag
+  real*8 hot_T, hot_rho
+  character*64 hbuf
+  integer hst
   
   real*8, allocatable :: pradius(:), &
        pmass(:),prho(:),ptemp(:), &
@@ -22,6 +25,12 @@ subroutine map_profile(lprofile_name)
   
   real*8 :: kboltz_cgs = 1.380662d-16
   
+  hot_T = 0.d0; hot_rho = 1.d12
+  call get_environment_variable('HOT_T_MEV', hbuf, status=hst)
+  if (hst.eq.0) read(hbuf,*) hot_T
+  call get_environment_variable('HOT_RHO', hbuf, status=hst)
+  if (hst.eq.0) read(hbuf,*) hot_rho
+  if (hot_T.gt.0.d0) write(*,*) 'HOT CLOUD: T[MeV], rho_min =', hot_T, hot_rho
 ! read profile      
   open(666,file=trim(lprofile_name),status='unknown', & 
        form='formatted',action='read')
@@ -134,6 +143,10 @@ subroutine map_profile(lprofile_name)
      endif
      
      
+! optional hot cloud: add thermal specific energy eps_th = 1.5*kT/m_u (T in MeV from HOT_T_MEV) where rho > HOT_RHO
+     if (hot_T .gt. 0.d0 .and. rho(i)/rho_gf .gt. hot_rho) then
+        eps(i) = eps(i) + hot_T*1.45d18*eps_gf
+     endif
 ! now get new pressures
      keytemp = 0 ! coming in with eps
      eosflag = 1 ! we want press to be reset
